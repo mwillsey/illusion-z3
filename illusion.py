@@ -1,4 +1,13 @@
+from turtle import circle
 import z3
+
+from enum import Enum
+
+class Offset(Enum):
+    Up = (-1, 0)
+    Down = (1, 0)
+    Left = (0, -1)
+    Right = (0, 1)
 
 def convert(s: str):
     grid = []
@@ -15,74 +24,98 @@ def convert(s: str):
     return grid
 
 
-def compute(flat: str, side: str):
-    flat = convert(flat)
-    side = convert(side)
+class Illusion:
+    def __init__(self, height, width):
+        self.height = height
+        self.width = width
+        self.opt = z3.Optimize()
+        self.offsets = []
 
-    height = len(flat)
-    assert len(side) == height
+        self.high = [
+            [z3.Bool(f'high-{y}-{x}') for x in range(width) ]
+            for y in range(height)
+        ]
 
-    width = len(flat[0])
-    assert len(side[0]) == width
+        self.color = [
+            [z3.Bool(f'color-{y}-{x}') for x in range(width) ]
+            for y in range(height)
+        ]
 
-    high = [
-        [z3.Bool(f'high-{y}-{x}') for x in range(width) ]
-        for y in range(height)
-    ]
+    def constrain(self, offset, values, weight = 1):
+        if offset not in self.offsets:
+            self.offsets.append(offset)
 
-    color = [
-        [z3.Bool(f'color-{y}-{x}') for x in range(width) ]
-        for y in range(height)
-    ]
+        assert offset is None or isinstance(offset, Offset)
+        for y in range(self.height):
+            for x in range(self.width):
+                color = self.get_color(y, x, offset)
+                self.opt.add_soft(color == values[y][x], weight=weight)
 
-    opt = z3.Optimize()
+    def get_color(self, y, x, offset):
+        if offset is None:
+            return self.color[y][x]
 
-    for y in range(height):
-        for x in range(width):
-            opt.add_soft(color[y][x] == flat[y][x])
+        yy = y + offset.value[0]
+        xx = x + offset.value[1]
+        if 0 <= yy < self.height and 0 <= xx < self.width:
+            obscured = z3.And(self.high[yy][xx], z3.Not(self.high[y][x]))
+            return z3.If(obscured, self.color[yy][xx], self.color[y][x])
+        else:
+            return self.color[y][x]
 
-            if y + 1 < height:
-                obscured = z3.And(high[y+1][x], z3.Not(high[y][x]))
-                side_color = z3.If(obscured, color[y+1][x], color[y][x])
-            else:
-                side_color = color[y][x]
+    def render_offset(self, model, offset):
+        output = ''
+        for y in range(self.height):
+            for x in range(self.width):
+                color = self.get_color(y, x, offset)
+                color = model.eval(color)
+                output += 'O' if color else '.'
+            output += '\n'
 
-            opt.add_soft(side_color == side[y][x])
+        return output
 
-    print(opt.check())
-    m = opt.model()
+    def solve(self):
+        print(self.opt.check())
+        m = self.opt.model()
+        for obj in self.opt.objectives():
+            print(m.eval(obj))
 
-    output = ''
-    for y in range(height):
-        for x in range(width):
-            is_color = m[color[y][x]]
-            is_high = m[high[y][x]]
+        output = ''
+        for y in range(self.height):
+            for x in range(self.width):
+                is_color = m[self.color[y][x]]
+                is_high = m[self.high[y][x]]
 
-            if is_color:
-                if is_high:
-                    output += 'O'
+                if is_color:
+                    if is_high:
+                        output += 'O'
+                    else:
+                        output += 'o'
                 else:
-                    output += 'o'
-            else:
-                if is_high:
-                    output += '*'
-                else:
-                    output += '.'
-        output += '\n'
+                    if is_high:
+                        output += '*'
+                    else:
+                        output += '.'
+            output += '\n'
 
-    print(output)
+        print(output)
+
+        for offset in self.offsets:
+            print(offset)
+            print(self.render_offset(m, offset))
 
 
-FLAT = """
-....................
+
+STRIPES = """
 OOOOOOOOOOOOOOOOOOOO
 ....................
 OOOOOOOOOOOOOOOOOOOO
 ....................
 OOOOOOOOOOOOOOOOOOOO
+....................
 """
 
-SIDE = """
+CIRCLE = """
 .......OOOOOO.......
 .....OOOOOOOOOO.....
 ...OOOOOOOOOOOOOO...
@@ -91,4 +124,31 @@ SIDE = """
 .......OOOOOO.......
 """
 
-compute(FLAT, SIDE)
+DOT = """
+....................
+....................
+........OOOO........
+........OOOO........
+....................
+....................
+"""
+
+STAR = """
+.........OO.........
+........OOOO........
+...OOOOOOOOOOOOOO...
+......OOOOOOOO......
+.....OO......OO.....
+....................
+"""
+
+
+illusion = Illusion(6, 20)
+illusion.constrain(Offset.Up, convert(DOT))
+illusion.constrain(Offset.Down, convert(STAR))
+illusion.solve()
+
+# illusion = Illusion(6, 20)
+# illusion.constrain(Offset.Up, convert(CIRCLE))
+# illusion.constrain(Offset.Down, convert(STAR))
+# illusion.solve()
