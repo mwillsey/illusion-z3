@@ -41,7 +41,7 @@ class Illusion:
             for y in range(height)
         ]
 
-    def constrain(self, offset, values, weight = 1):
+    def constrain(self, offset, values, weight = 10):
         if offset not in self.offsets:
             self.offsets.append(offset)
 
@@ -75,6 +75,20 @@ class Illusion:
         return output
 
     def solve(self):
+
+        # minimize color/height changes per row
+        # idk if this is a good idea
+        self.opt.minimize(z3.Sum([
+            z3.If(a == b, 0, 1)
+            for row in self.color
+            for a, b in zip(row, row[1:])
+        ]))
+        self.opt.minimize(z3.Sum([
+            z3.If(a == b, 0, 1)
+            for row in self.high
+            for a, b in zip(row, row[1:])
+        ]))
+
         print(self.opt.check())
         m = self.opt.model()
         for obj in self.opt.objectives():
